@@ -1,74 +1,90 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WORKSPACE_DIR="/home/nucshao/Climber_slam_2026_NAV"
+NAV_WORKSPACE_DIR="/home/nucshao/Climber_slam_2026_NAV"
 CODE_WORKSPACE_DIR="/home/nucshao/Climber_slam_2026_code"
+COD_FRONT_LAUNCH="/home/nucshao/Climber_slam_2026_code/COD_Behavior/launch/cod_front_tactical.launch.py"
+
 ROS_SETUP_FILE="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/ros_logs}"
 
-if [[ ! -f "$ROS_SETUP_FILE" ]]; then
-  echo "[ERROR] ROS setup file not found: $ROS_SETUP_FILE"
-  exit 1
-fi
+check_file() {
+  local path="$1"
+  local hint="${2:-}"
 
-if [[ ! -f "$WORKSPACE_DIR/install/setup.bash" ]]; then
-  echo "[ERROR] Workspace setup file not found: $WORKSPACE_DIR/install/setup.bash"
-  echo "[HINT] Please build first: cd $WORKSPACE_DIR && colcon build"
-  exit 1
-fi
+  if [[ ! -f "$path" ]]; then
+    echo "[ERROR] File not found: $path"
+    if [[ -n "$hint" ]]; then
+      echo "[HINT] $hint"
+    fi
+    exit 1
+  fi
+}
 
-if [[ ! -f "$CODE_WORKSPACE_DIR/install/setup.bash" ]]; then
-  echo "[ERROR] Code workspace setup file not found: $CODE_WORKSPACE_DIR/install/setup.bash"
-  echo "[HINT] Please build first: cd $CODE_WORKSPACE_DIR && colcon build"
-  exit 1
-fi
+check_file "$ROS_SETUP_FILE"
+check_file "$NAV_WORKSPACE_DIR/install/setup.bash" \
+  "Please build first: cd $NAV_WORKSPACE_DIR && colcon build"
+check_file "$CODE_WORKSPACE_DIR/install/setup.bash" \
+  "Please build first: cd $CODE_WORKSPACE_DIR && colcon build"
+check_file "$COD_FRONT_LAUNCH"
 
 mkdir -p "$ROS_LOG_DIR"
 export ROS_LOG_DIR
 
-# 加载 ROS2 与工作区环境。
-# 注意：ROS setup 脚本内部会访问未定义变量，需临时关闭 nounset(-u)。
+# ROS setup scripts may reference unset variables, so disable nounset while sourcing.
 set +u
 source "$ROS_SETUP_FILE"
-source "$WORKSPACE_DIR/install/setup.bash"
+source "$NAV_WORKSPACE_DIR/install/setup.bash"
 source "$CODE_WORKSPACE_DIR/install/setup.bash"
 set -u
 
 PIDS=()
 
 cleanup() {
-  # 只在有后台进程时执行清理
-  if [[ ${#PIDS[@]} -gt 0 ]]; then
-    echo ""
-    echo "[INFO] Stopping launched processes..."
-    for pid in "${PIDS[@]}"; do
-      if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null || true
-      fi
-    done
-    wait || true
+  if [[ ${#PIDS[@]} -eq 0 ]]; then
+    return
   fi
+
+  echo ""
+  echo "[INFO] Stopping launched processes..."
+  for pid in "${PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+  wait || true
+}
+
+launch_background() {
+  local name="$1"
+  local workdir="$2"
+  shift 2
+
+  echo "[INFO] Starting $name..."
+  (
+    cd "$workdir"
+    "$@"
+  ) &
+  PIDS+=("$!")
+  sleep 1
 }
 
 trap cleanup INT TERM EXIT
 
-cd "$WORKSPACE_DIR"
+launch_background "Livox MID360 driver" \
+  "$NAV_WORKSPACE_DIR" \
+  ros2 launch livox_ros_driver2 rviz_MID360_launch.py
 
-ros2 launch livox_ros_driver2 rviz_MID360_launch.py &
-PIDS+=("$!")
+launch_background "single Nav2 bringup" \
+  "$NAV_WORKSPACE_DIR" \
+  ros2 launch rm_bringup singlenav_launch.py
 
-# 给第一个 launch 少量启动时间，避免日志相互抢占
-sleep 1
+echo "[INFO] Waiting 5 seconds before starting COD front tactical behavior..."
+sleep 5
 
-ros2 launch rm_bringup singlenav_launch.py &
-PIDS+=("$!")
+launch_background "COD front tactical behavior" \
+  "$CODE_WORKSPACE_DIR" \
+  ros2 launch "$COD_FRONT_LAUNCH"
 
-# 启动 COD 行为树前端 tactical_front
-sleep 1
-(
-  cd "$CODE_WORKSPACE_DIR"
-  ros2 launch cod_behavior cod_front_tactical.launch.py
-) &
-PIDS+=("$!")
-
+echo "[INFO] All launch processes started. Press Ctrl+C to stop them."
 wait
