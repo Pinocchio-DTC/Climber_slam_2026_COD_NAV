@@ -78,8 +78,8 @@ controller_server:  # 局部控制器服务配置
     general_goal_checker:  # 目标检查器配置
       stateful: True  # 进入到达判定后保持成功状态，减小噪声导致的反复退出
       plugin: "nav2_controller::PositionGoalChecker"  # 使用的插件类名
-      xy_goal_tolerance: 0.3  # 适度放宽到达半径，减少目标点附近来回修正
-      path_length_tolerance: 0.8  # 放宽末端路径长度容差，减少末端绕圈
+      xy_goal_tolerance: 0.5  # 进一步放宽到达半径，减少目标点附近来回修正
+      path_length_tolerance: 1.0  # 进一步放宽末端路径长度容差，减少末端绕圈
     FollowPath:  # 路径跟踪控制器配置
       plugin: "goal_approach_controller::GoalApproachController"  # 使用的插件类名
       inner_plugin: "nav2_mppi_controller::MPPIController"  # 内部实际执行的控制器插件

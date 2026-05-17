@@ -7,6 +7,11 @@ COD_FRONT_LAUNCH="/home/nucshao/Climber_slam_2026_code/COD_Behavior/launch/cod_f
 
 ROS_SETUP_FILE="${ROS_SETUP_FILE:-/opt/ros/humble/setup.bash}"
 ROS_LOG_DIR="${ROS_LOG_DIR:-/tmp/ros_logs}"
+INITIAL_POSE_X="${INITIAL_POSE_X:--0.485}"
+INITIAL_POSE_Y="${INITIAL_POSE_Y:-4.04}"
+INITIAL_POSE_Z="${INITIAL_POSE_Z:-0.0}"
+INITIAL_POSE_QZ="${INITIAL_POSE_QZ:-0.00178}"
+INITIAL_POSE_QW="${INITIAL_POSE_QW:-0.999998}"
 
 check_file() {
   local path="$1"
@@ -69,6 +74,28 @@ launch_background() {
   sleep 1
 }
 
+publish_initial_pose() {
+  echo "[INFO] Publishing initial pose on /initialpose..."
+  ros2 topic pub --times 3 --rate 1 /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+    "{
+      header: {frame_id: 'map'},
+      pose: {
+        pose: {
+          position: {x: ${INITIAL_POSE_X}, y: ${INITIAL_POSE_Y}, z: ${INITIAL_POSE_Z}},
+          orientation: {x: 0.0, y: 0.0, z: ${INITIAL_POSE_QZ}, w: ${INITIAL_POSE_QW}}
+        },
+        covariance: [
+          0.25, 0.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, 0.25, 0.0, 0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, 0.0, 0.0, 0.0, 0.0, 0.0685
+        ]
+      }
+    }"
+}
+
 trap cleanup INT TERM EXIT
 
 launch_background "Livox MID360 driver" \
@@ -79,8 +106,10 @@ launch_background "single Nav2 bringup" \
   "$NAV_WORKSPACE_DIR" \
   ros2 launch rm_bringup singlenav_launch.py
 
-echo "[INFO] Waiting 5 seconds before starting COD front tactical behavior..."
-sleep 5
+echo "[INFO] Waiting 5 seconds before publishing initial pose..."
+sleep 2
+
+publish_initial_pose
 
 launch_background "COD front tactical behavior" \
   "$CODE_WORKSPACE_DIR" \
